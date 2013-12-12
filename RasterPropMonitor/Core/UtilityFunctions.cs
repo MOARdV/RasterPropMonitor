@@ -2,28 +2,107 @@ using System;
 using System.Text;
 using UnityEngine;
 using System.Collections.Generic;
+using System.IO;
 
 namespace JSI
 {
 	public static class JUtil
 	{
-		public static RasterPropMonitorComputer GetComputer(InternalProp thatProp)
+
+		public static Material DrawLineMaterial()
 		{
-			// I hate copypaste, and this is what I'm going to do about it.
-			if (thatProp.part != null) {
-				for (int i = 0; i < thatProp.part.Modules.Count; i++)
-					if (thatProp.part.Modules[i].ClassName == typeof(RasterPropMonitorComputer).Name) {
-						var other = thatProp.part.Modules[i] as RasterPropMonitorComputer;
-						return other;
-					}
-				return thatProp.part.AddModule(typeof(RasterPropMonitorComputer).Name) as RasterPropMonitorComputer;
-			}
-			return null;
+			var lineMaterial = new Material("Shader \"Lines/Colored Blended\" {" +
+			                   "SubShader { Pass {" +
+			                   "   BindChannels { Bind \"Color\",color }" +
+			                   "   Blend SrcAlpha OneMinusSrcAlpha" +
+			                   "   ZWrite Off Cull Off Fog { Mode Off }" +
+			                   "} } }");
+			lineMaterial.hideFlags = HideFlags.HideAndDontSave;
+			lineMaterial.shader.hideFlags = HideFlags.HideAndDontSave;
+			return lineMaterial;
+		}
+
+		public static bool VesselIsInIVA(Vessel thatVessel)
+		{
+			if (!HighLogic.LoadedSceneIsFlight || thatVessel != FlightGlobals.ActiveVessel)
+				return false;
+			return IsInIVA();
+		}
+
+		public static bool IsInIVA()
+		{
+			return CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA || CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal;
 		}
 
 		public static void LogMessage(InternalModule caller, string line, params object[] list)
 		{
 			Debug.Log(String.Format(caller.ClassName + ": " + line, list));
+		}
+
+		public static float MassageObjectToFloat(object thatValue)
+		{
+			// RPMC only produces doubles, floats, ints and strings.
+			if (thatValue is double)
+				return (float)(double)thatValue;
+			if (thatValue is float)
+				return (float)thatValue;
+			if (thatValue is int)
+				return (float)(int)thatValue;
+			return float.NaN;
+		}
+
+		public static double MassageObjectToDouble(object thatValue)
+		{
+			// RPMC only produces doubles, floats, ints and strings.
+			if (thatValue is double)
+				return (double)thatValue;
+			if (thatValue is float)
+				return (double)(float)thatValue;
+			if (thatValue is int)
+				return (double)(int)thatValue;
+			return double.NaN;
+		}
+		// Working in a generic to make that a generic function for all numbers is too much work
+		// and we only need these two anyway.
+		public static float DualLerp(float from, float to, float from2, float to2, float value)
+		{
+			if (from2 < to2) {
+				if (value < from2)
+					value = from2;
+				else if (value > to2)
+					value = to2;
+			} else {
+				if (value < to2)
+					value = to2;
+				else if (value > from2)
+					value = from2;	
+			}
+			return (to - from) * ((value - from2) / (to2 - from2)) + from;
+		}
+
+		public static double DualLerp(double from, double to, double from2, double to2, double value)
+		{
+			if (from2 < to2) {
+				if (value < from2)
+					value = from2;
+				else if (value > to2)
+					value = to2;
+			} else {
+				if (value < to2)
+					value = to2;
+				else if (value > from2)
+					value = from2;	
+			}
+			return (to - from) * ((value - from2) / (to2 - from2)) + from;
+		}
+
+		public static string LoadPageDefinition(string pageDefinition)
+		{
+			try {
+				return string.Join(Environment.NewLine, File.ReadAllLines(KSPUtil.ApplicationRootPath + "GameData/" + pageDefinition.EnforceSlashes(), Encoding.UTF8));
+			} catch {
+				return pageDefinition.UnMangleConfigText();
+			}
 		}
 
 		public static Color32 HexRGBAToColor(string hex)

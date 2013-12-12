@@ -44,13 +44,16 @@ namespace JSI
 		public bool needsElectricCharge = true;
 		[KSPField]
 		public Color32 defaultFontTint = Color.white;
+		[KSPField]
+		public string noSignalTextureURL = string.Empty;
+		// This needs to be public so that pages can point it.
+		public FlyingCamera CameraStructure;
 		// Some things in life are constant;
 		private const int firstCharacter = 32;
 		private const float defaultFOV = 60f;
 		// Internal stuff.
 		private Texture2D fontTexture;
 		private RenderTexture screenTexture;
-		private FlyingCamera cam;
 		// Page definition syntax.
 		private readonly string[] lineSeparator = { Environment.NewLine };
 		// Local variables
@@ -70,9 +73,15 @@ namespace JSI
 		private Rect[] fontCharacters;
 		private FXGroup audioOutput;
 		private double electricChargeReserve;
+		public Texture2D noSignalTexture;
 
 		public void Start()
 		{
+
+			// Install the calculator module.
+			comp = RasterPropMonitorComputer.Instantiate(internalProp);
+			comp.UpdateRefreshRates(refreshTextRate, refreshDataRate);
+
 			// Loading the font...
 			JUtil.LogMessage(this, "Trying to locate \"{0}\" in GameDatabase...", fontTransform);
 			if (GameDatabase.Instance.ExistsTexture(fontTransform.EnforceSlashes())) {
@@ -107,7 +116,14 @@ namespace JSI
 			foreach (string layerID in textureLayerID.Split())
 				screenMat.SetTexture(layerID.Trim(), screenTexture);
 
-			// The neat trick. IConfigMode doesn't work. No amount of kicking got it to work.
+			if (GameDatabase.Instance.ExistsTexture(noSignalTextureURL.EnforceSlashes())) {
+				noSignalTexture = GameDatabase.Instance.GetTexture(noSignalTextureURL.EnforceSlashes(), false);
+			}
+
+			// Create camera instance...
+			CameraStructure = new FlyingCamera(part, screenTexture, cameraAspect);
+
+			// The neat trick. IConfigNode doesn't work. No amount of kicking got it to work.
 			// Well, we don't need it. GameDatabase, gimme config nodes for all props!
 			foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes ("PROP")) {
 				// Now, we know our own prop name.
@@ -138,10 +154,6 @@ namespace JSI
 			}
 			JUtil.LogMessage(this, "Done setting up pages, {0} pages ready.", pages.Count);
 
-			// Install the calculator module.
-			comp = JUtil.GetComputer(internalProp);
-			comp.UpdateRefreshRates(refreshTextRate, refreshDataRate);
-
 			// Load our state from storage...
 			persistentVarName = "activePage" + internalProp.propID;
 			persistence = new PersistenceAccessor(part);
@@ -150,10 +162,6 @@ namespace JSI
 				activePage = pages[activePageID.Value];
 			}
 			activePage.Active(true);
-
-			// Create and point the camera.
-			cam = new FlyingCamera(part, screenTexture, cameraAspect);
-			cam.PointCamera(activePage.camera, activePage.cameraFOV);
 
 			// If we have global buttons, set them up.
 			if (!string.IsNullOrEmpty(globalButtons)) {
@@ -176,18 +184,21 @@ namespace JSI
 
 		public void GlobalButtonClick(int buttonID)
 		{
+			if (needsElectricCharge && electricChargeReserve < 0.01d)
+				return;
 			activePage.GlobalButtonClick(buttonID);
 			PlayClickSound(audioOutput);
 		}
 
 		public void PageButtonClick(MonitorPage triggeredPage)
 		{
+			if (needsElectricCharge && electricChargeReserve < 0.01d)
+				return;
 			if (triggeredPage != activePage) {
 				activePage.Active(false);
 				activePage = triggeredPage;
 				activePage.Active(true);
 				persistence.SetVar(persistentVarName, activePage.pageNumber);
-				cam.PointCamera(activePage.camera, activePage.cameraFOV);
 				refreshDrawCountdown = refreshTextCountdown = 0;
 				comp.updateForced = true;
 				firstRenderComplete = false;
@@ -259,20 +270,8 @@ namespace JSI
 				GL.Clear(true, true, emptyColor);
 			} else {
 
-				// Draw the background, if any.
-				switch (activePage.background) {
-					case MonitorPage.BackgroundType.Camera:
-						if (!cam.Render())
-							GL.Clear(true, true, emptyColor);
-						break;
-					case MonitorPage.BackgroundType.None:
-						GL.Clear(true, true, emptyColor);
-						break;
-					default:
-						if (!activePage.RenderBackground(screenTexture))
-							GL.Clear(true, true, emptyColor);
-						break;
-				}
+				// Actual rendering of the background is delegated to the page object.
+				activePage.RenderBackground(screenTexture);
 
 				// This is the important witchcraft. Without that, DrawTexture does not print where we expect it to.
 				// Cameras don't care because they have their own matrices, but DrawTexture does.
@@ -328,14 +327,7 @@ namespace JSI
 
 		public override void OnUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight || vessel != FlightGlobals.ActiveVessel)
-				return;
-
-			if (!(CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA ||
-			    CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal))
-				return;
-
-			if (!UpdateCheck())
+			if (!JUtil.VesselIsInIVA(vessel) || !UpdateCheck())
 				return;
 
 			if (!activePage.isMutable) { 
@@ -344,8 +336,11 @@ namespace JSI
 					FillScreenBuffer();
 					RenderScreen();
 					firstRenderComplete = true;
-				} else
+				} else {
 					CheckForElectricCharge();
+					if (needsElectricCharge && electricChargeReserve < 0.01d)
+						RenderScreen();
+				}
 			} else {
 				if (textRefreshRequired)
 					FillScreenBuffer();

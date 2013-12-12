@@ -99,7 +99,7 @@ namespace JSI
 				case "intlight":
 					lightObjects = internalModel.FindModelComponents<Light>();
 					if (needsElectricCharge) {
-						comp = JUtil.GetComputer(internalProp);
+						comp = RasterPropMonitorComputer.Instantiate(internalProp);
 						comp.UpdateRefreshRates(lightCheckRate, lightCheckRate);
 						electricChargeReserve = (double)comp.ProcessVariable("ELECTRIC");
 					}
@@ -166,7 +166,7 @@ namespace JSI
 
 		public override void OnUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight || vessel != FlightGlobals.ActiveVessel)
+			if (!JUtil.IsInIVA())
 				return;
 
 			// Bizarre, but looks like I need to animate things offscreen if I want them in the right condition when camera comes back.

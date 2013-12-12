@@ -22,7 +22,7 @@ namespace JSI
 
 		public void Start()
 		{
-			comp = JUtil.GetComputer(internalProp);
+			comp = RasterPropMonitorComputer.Instantiate(internalProp);
 			textObjTransform = internalProp.FindModelTransform(transformName);
 			textObj = InternalComponents.Instance.CreateText(fontName, fontSize, textObjTransform, string.Empty);
 			sourceString = labelText.UnMangleConfigText();
@@ -40,14 +40,7 @@ namespace JSI
 
 		public override void OnUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight || vessel != FlightGlobals.ActiveVessel)
-				return;
-
-			if (!(CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA ||
-			    CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal))
-				return;
-
-			if (!UpdateCheck())
+			if (!JUtil.VesselIsInIVA(vessel) || !UpdateCheck())
 				return;
 
 			textObj.text.Text = StringProcessor.ProcessString(sourceString, comp);

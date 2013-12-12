@@ -5,13 +5,13 @@ namespace JSI
 	public class JSIVariableAnimator: InternalModule
 	{
 		[KSPField]
-		public string animationName = "";
+		public string animationName = string.Empty;
 		[KSPField]
-		public string variableName = "";
+		public string variableName = string.Empty;
 		[KSPField]
 		public int refreshRate = 10;
 		[KSPField]
-		public string scale;
+		public string scale = string.Empty;
 		[KSPField]
 		public Vector2 threshold;
 		[KSPField]
@@ -24,8 +24,8 @@ namespace JSI
 		public bool reverse;
 		[KSPField]
 		public string alarmShutdownButton;
-		private readonly float?[] scalePoints = { null, null };
-		private readonly string[] varName = { null, null };
+		private readonly VariableOrNumber[] scaleEnds = new VariableOrNumber[3];
+		private readonly float[] scaleResults = new float[3];
 		private RasterPropMonitorComputer comp;
 		private int updateCountdown;
 		private Animation anim;
@@ -46,91 +46,53 @@ namespace JSI
 		public void Start()
 		{
 			string[] tokens = scale.Split(',');
+			if (tokens.Length != 2)
+				JUtil.LogMessage(this, "Could not parse the 'scale' parameter: {0}", scale);
+			else {
 
-			for (int i = 0; i < tokens.Length; i++) {
-				float realValue;
-				if (float.TryParse(tokens[i], out realValue)) {
-					scalePoints[i] = realValue;
-				} else {
-					varName[i] = tokens[i].Trim();
+				comp = RasterPropMonitorComputer.Instantiate(internalProp);
+				scaleEnds[0] = new VariableOrNumber(tokens[0], comp, this);
+				scaleEnds[1] = new VariableOrNumber(tokens[1], comp, this);
+				scaleEnds[2] = new VariableOrNumber(variableName, comp, this);
+
+				if (threshold != Vector2.zero) {
+					thresholdMode = true;
+
+					float min = Mathf.Min(threshold.x, threshold.y);
+					float max = Mathf.Max(threshold.x, threshold.y);
+					threshold.x = min;
+					threshold.y = max;
+
+					audioOutput = JUtil.SetupIVASound(internalProp, alarmSound, alarmSoundVolume, false);
+					if (!string.IsNullOrEmpty(alarmShutdownButton))
+						SmarterButton.CreateButton(internalProp, alarmShutdownButton, AlarmShutdown);
 				}
 
+				anim = internalProp.FindModelAnimators(animationName)[0];
+				anim.enabled = true;
+				anim[animationName].speed = 0;
+				anim.Play();
 			}
-
-			if (threshold != Vector2.zero) {
-				thresholdMode = true;
-
-				float min = Mathf.Min(threshold.x, threshold.y);
-				float max = Mathf.Max(threshold.x, threshold.y);
-				threshold.x = min;
-				threshold.y = max;
-
-				audioOutput = JUtil.SetupIVASound(internalProp, alarmSound, alarmSoundVolume, false);
-				if (!string.IsNullOrEmpty(alarmShutdownButton)) {
-					SmarterButton.CreateButton(internalProp, alarmShutdownButton, AlarmShutdown);
-				}
-			}
-
-			comp = JUtil.GetComputer(internalProp);
-
-			anim = internalProp.FindModelAnimators(animationName)[0];
-			anim.enabled = true;
-			anim[animationName].speed = 0;
-			anim.Play();
 		}
 
 		public void AlarmShutdown()
 		{
-			if (audioOutput != null && alarmActive) {
+			if (audioOutput != null && alarmActive)
 				audioOutput.audio.Stop();
-			}
-		}
-
-		private static float FixType(object thatValue)
-		{
-			// We only produce doubles, floats and ints in there.
-			// I hope this way I can get rid of all the silly typecasting in RPMC.
-			if (thatValue is double) {
-				return (float)(double)thatValue;
-			}
-			if (thatValue is float) {
-				return (float)thatValue;
-			}
-			if (thatValue is int) {
-				return (float)(int)thatValue;
-			}
-			return float.NaN;
 		}
 
 		public override void OnUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight ||
-			    vessel != FlightGlobals.ActiveVessel)
+			if (!JUtil.VesselIsInIVA(vessel) || !UpdateCheck())
 				return;
 
-			// Let's see if it works that way first.
-			if (!(CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA ||
-			    CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal))
-				return;
+			for (int i = 0; i < 3; i++)
+				if (!scaleEnds[i].Get(out scaleResults[i]))
+					return;
 
-			if (!UpdateCheck())
-				return;
-
-			float scaleBottom = scalePoints[0] ?? FixType(comp.ProcessVariable(varName[0]));
-			if (float.IsNaN(scaleBottom))
-				JUtil.LogMessage(this, "Error, {0} failed to produce a usable number.", varName[0]);
-
-			float scaleTop = scalePoints[1] ?? FixType(comp.ProcessVariable(varName[1]));
-			if (float.IsNaN(scaleTop))
-				JUtil.LogMessage(this, "Error, {0} failed to produce a usable number.", varName[1]);
-
-			float varValue = FixType(comp.ProcessVariable(variableName));
-			if (float.IsNaN(varValue))
-				JUtil.LogMessage(this, "Error, {0} failed to produce a usable number.", variableName);
-
-			float scaledValue = Mathf.InverseLerp(scaleBottom, scaleTop, varValue);
 
 			if (thresholdMode) {
+				float scaledValue = Mathf.InverseLerp(scaleResults[0], scaleResults[1], scaleResults[2]);
 				if (scaledValue >= threshold.x && scaledValue <= threshold.y) {
 					if (audioOutput != null && !alarmActive) {
 						audioOutput.audio.Play();
@@ -145,9 +107,8 @@ namespace JSI
 					}
 				}
 
-			} else {
-				anim[animationName].normalizedTime = Mathf.Lerp(reverse ? 1f : 0f, reverse ? 0f : 1f, scaledValue);
-			}
+			} else
+				anim[animationName].normalizedTime = JUtil.DualLerp(reverse ? 1f : 0f, reverse ? 0f : 1f, scaleResults[0], scaleResults[1], scaleResults[2]);
 
 		}
 	}
